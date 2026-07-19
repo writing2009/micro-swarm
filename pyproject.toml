@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=61.0.0", "wheel"]
+build-backend = "setuptools.build-meta"
+
+[project]
+name = "micro-swarm"
+version = "1.0.0"
+description = "A generic phased microtask orchestrator for running local AI worker swarms with TDD constraints"
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "MIT"}
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    # Uses standard library for tomllib in Python 3.11+, otherwise needs tomli
+    "tomli; python_version < '3.11'",
+]
+
+[project.scripts]
+micro-swarm = "micro_swarm.cli:main"
