@@ -1,8 +1,20 @@
 # Micro-Swarm: Phased Microtask Orchestrator
 
-`micro-swarm` is a standalone, lightweight orchestrator that segments complex development tasks (typically scoped to entire software modules) into a linear dependency chain of small, single-assertion **phased microtasks**. 
+`micro-swarm` is a standalone, lightweight orchestrator that segments complex development tasks (typically scoped to entire software modules) into a linear dependency chain of small, single-assertion **phased microtasks**.
 
 This approach minimizes the prompt size and LLM context window required for any single step, making it highly reliable when running local AI agent instances (e.g., using Ollama) with 35B parameter class models.
+
+---
+
+### Why We Are Open-Sourcing `micro-swarm`
+
+Most current AI-native development platforms rely on massive, closed-source cloud models with high API costs and potential data privacy concerns. While local, open-weights models (like the 35B parameter class) offer complete privacy and cost-free execution on consumer-grade hardware, they have traditionally struggled with the multi-step reasoning required for full-scale software engineering tasks.
+
+We built and are sharing `micro-swarm` to bridge this gap.
+
+By introducing the **Phased Microtask Orchestration** paradigm, we show that you don't need giant context windows or expensive cloud endpoints to build complex codebases. Instead, by segmenting feature development into small, linear, self-verifying phases (Research → Discovery → TDD Red → TDD Green) and utilizing isolated Git worktrees, we enable local models to work concurrently and with a high degree of correctness.
+
+We are sharing this framework with the open-source community to democratize agentic software development, allowing any developer or team to run private, secure, and cost-efficient AI coding swarms locally.
 
 ---
 
