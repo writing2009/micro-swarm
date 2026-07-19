@@ -223,9 +223,10 @@ def run_watch_loop(concurrency: int = 3, loop_sleep: int = 120) -> None:
                         ok = review_phased_microtask(mtask_id, mtask, wt, acceptance_cmd)
                         log("microtask_reviewed", task=mtask_id, ok=ok)
                         if not ok:
-                            # Re-add to queue by removing claim
+                            # Re-add to queue by removing claim and cleanup failed done/review files
                             MICRO_CLAIMS_DIR.joinpath(f"{mtask_id}.toml").unlink(missing_ok=True)
                             done_f.unlink(missing_ok=True)
+                            review_f.unlink(missing_ok=True)
                 
                 # Spawn next pending microtask
                 next_mtask = next_pending_phased_microtask(parent_task)
