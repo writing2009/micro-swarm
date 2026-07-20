@@ -1,3 +1,5 @@
+from .config import MICRO_DONE_DIR
+
 def generate_phased_prompt(task: dict, phase: dict, spec_text: str = "") -> str:
     """Generate phase-specific prompts containing explicit skill tool call instructions."""
     phase_type = phase["phase_type"]
@@ -5,6 +7,9 @@ def generate_phased_prompt(task: dict, phase: dict, spec_text: str = "") -> str:
     module = phase["module"]
     assertion_id = phase["assertion_id"]
     a_lower = assertion_id.lower()
+    # Workers run with cwd inside their worktree; the done-file path must be
+    # absolute or it lands in <worktree>/state where the orchestrator never looks
+    done_dir = MICRO_DONE_DIR
     
     # Extract details or use general placeholders
     acceptance = task.get("acceptance", "pytest")
@@ -26,7 +31,7 @@ WORKFLOW:
 1. Read the specification design files.
 2. Write {module_path}/RESEARCH.md detailing data contracts and open design questions.
 3. Commit your work: git add {module_path}/RESEARCH.md && git commit -m "{parent}.R: research"
-4. Write state/micro_done/{parent}.R.toml with task/worker/commit/acceptance_exit=0.
+4. Write {done_dir}/{parent}.R.toml with task/worker/commit/acceptance_exit=0.
 5. Stop.
 """
 
@@ -45,7 +50,7 @@ WORKFLOW:
 1. Read the module specifications and RESEARCH.md.
 2. Write {module_path}/TEST_PLAN.md detailing the test files and fixtures needed for each assertion.
 3. Commit your work: git add {module_path}/TEST_PLAN.md && git commit -m "{parent}.D: test plan"
-4. Write state/micro_done/{parent}.D.toml with task/worker/commit/acceptance_exit=0.
+4. Write {done_dir}/{parent}.D.toml with task/worker/commit/acceptance_exit=0.
 5. Stop.
 """
 
@@ -65,7 +70,7 @@ WORKFLOW:
 2. Write ONE failing test file {module_path}/tests/test_{a_lower}_*.py for this assertion only.
 3. Run the tests and confirm it fails (exits 1) as expected.
 4. Commit: git add {module_path}/tests/ && git commit -m "{parent}.{assertion_id}.T: red test"
-5. Write state/micro_done/{parent}.{assertion_id}.T.toml with task/worker/commit/acceptance_exit=0.
+5. Write {done_dir}/{parent}.{assertion_id}.T.toml with task/worker/commit/acceptance_exit=0.
 6. Stop. Do NOT start implementing code.
 """
 
@@ -86,7 +91,7 @@ WORKFLOW:
 3. Call the `skill` tool with name "verification-before-completion" and follow its instructions.
 4. Re-run the tests, confirm exit 0, and verify all code is linted.
 5. Commit: git add {module_path}/ && git commit -m "{parent}.{assertion_id}.I: green impl"
-6. Write state/micro_done/{parent}.{assertion_id}.I.toml with task/worker/commit/acceptance_exit=0.
+6. Write {done_dir}/{parent}.{assertion_id}.I.toml with task/worker/commit/acceptance_exit=0.
 7. Stop.
 """
 

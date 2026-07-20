@@ -7,7 +7,7 @@ name = "micro-swarm"
 version = "1.0.0"
 description = "A generic phased microtask orchestrator for running local AI worker swarms with TDD constraints"
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 license = {text = "MIT"}
 classifiers = [
     "Programming Language :: Python :: 3",

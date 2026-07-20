@@ -12,9 +12,15 @@ def create_worker_worktree(parent_id: str, worker_id: str) -> Path:
     wt = WORKTREES_DIR / f"{worker_id}-{parent_id}"
     
     if not wt.exists():
-        # Check out a new branch off main
+        # Drop registrations for worktree dirs deleted outside git
         subprocess.run(
-            ["git", "worktree", "add", "-b", branch, str(wt), "main"],
+            ["git", "worktree", "prune"],
+            cwd=str(ROOT), check=False, capture_output=True
+        )
+        # Check out a new branch off main; -B resets a branch left over
+        # from a previous run of the same task
+        subprocess.run(
+            ["git", "worktree", "add", "-B", branch, str(wt), "main"],
             cwd=str(ROOT), check=True, capture_output=True
         )
         
@@ -39,11 +45,13 @@ def sync_skills_to_worktree(wt: Path) -> None:
     
     if dst_skills.exists():
         return # Already synced
-        
-    dst_skills.mkdir(parents=True, exist_ok=True)
+
     if not src_skills.exists():
+        # Don't create the destination dir, so skills added later still sync
         return
-        
+
+    dst_skills.mkdir(parents=True, exist_ok=True)
+
     for entry in src_skills.iterdir():
         real_src = entry.resolve()
         if not real_src.exists():
@@ -65,7 +73,7 @@ def write_worker_opencode_json(worker_id: str, wt: Path, worker_config: dict) ->
     
     host = worker_config.get("host", "localhost")
     model = worker_config.get("model", "qwen3.6:35b")
-    base = f"http://{host}:11434/v1" if host != "localhost" else "http://localhost:11434/v1"
+    base = f"http://{host}:11434/v1"
     provider_name = f"ollama-{host.split('.')[0]}"
     
     cfg = {

@@ -1,6 +1,11 @@
 from pathlib import Path
 from .config import MICRO_DONE_DIR
 
+try:
+    import tomllib  # py311+
+except ModuleNotFoundError:
+    import tomli as tomllib  # type: ignore
+
 def segment_task_phased(task: dict) -> list[dict]:
     """Segment a parent task into research, discovery, and a T/I pair per assertion."""
     parent_id = task["id"]
@@ -66,7 +71,14 @@ def microtask_status(mtask_id: str) -> str:
     claim_f = MICRO_CLAIMS_DIR / f"{mtask_id}.toml"
     
     if done_f.exists() and review_f.exists():
-        return "done"
+        # A review file with a fail verdict (left by an interrupted cleanup)
+        # must not count as done
+        try:
+            with open(review_f, "rb") as f:
+                if tomllib.load(f).get("verdict") == "pass":
+                    return "done"
+        except Exception:
+            pass
     if claim_f.exists():
         return "claimed"
     return "pending"

@@ -71,6 +71,11 @@ def claim_microtask(mtask_id: str, worker_id: str, wt: Path) -> bool:
     claim_file.write_text(content)
     return True
 
+# Popen handles for workers spawned by this orchestrator process, keyed by
+# microtask id. poll() on these reaps exited children; a zombie child would
+# otherwise pass the os.kill(pid, 0) liveness check forever.
+_worker_procs: dict[str, subprocess.Popen] = {}
+
 def spawn_phased_worker(task: dict, mtask: dict, worker_id: str, wt: Path, worker_config: dict) -> None:
     """Spawn the local LLM agent to execute the microtask."""
     mtask_id = mtask["id"]
@@ -89,20 +94,21 @@ def spawn_phased_worker(task: dict, mtask: dict, worker_id: str, wt: Path, worke
     log_file = log_dir / f"{mtask_id}.log"
     
     # Run the worker process
-    lf = open(log_file, "w")
     host = worker_config.get("host", "localhost")
     model = worker_config.get("model", "qwen3.6:35b")
     provider_name = f"ollama-{host.split('.')[0]}"
-    
-    proc = subprocess.Popen(
-        ["opencode", "run", "--auto", "-m", f"{provider_name}/{model}", str(prompt_file)],
-        cwd=str(wt),
-        stdout=lf,
-        stderr=subprocess.STDOUT,
-        stdin=subprocess.DEVNULL,
-        preexec_fn=os.setpgrp if hasattr(os, "setpgrp") else None
-    )
-    
+
+    with open(log_file, "w") as lf:
+        proc = subprocess.Popen(
+            ["opencode", "run", "--auto", "-m", f"{provider_name}/{model}", str(prompt_file)],
+            cwd=str(wt),
+            stdout=lf,
+            stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL,
+            preexec_fn=os.setpgrp if hasattr(os, "setpgrp") else None
+        )
+    _worker_procs[mtask_id] = proc
+
     # Record PID in claim to allow reaping
     claim_file = MICRO_CLAIMS_DIR / f"{mtask_id}.toml"
     content = claim_file.read_text() + f"pid = {proc.pid}\n"
@@ -120,10 +126,21 @@ def reap_microtask_workers() -> None:
             pid = c.get("pid")
             if not pid:
                 continue
-            
-            # Check if PID is still active
-            os.kill(pid, 0)
-        except ProcessLookupError:
+
+            proc = _worker_procs.get(mtask_id)
+            if proc is not None:
+                if proc.poll() is None:
+                    continue  # still running
+                del _worker_procs[mtask_id]
+            else:
+                # Claim from a previous orchestrator process; a pid check is
+                # the best we can do
+                try:
+                    os.kill(pid, 0)
+                    continue
+                except ProcessLookupError:
+                    pass
+
             # Worker process exited. Check if it completed
             done_file = MICRO_DONE_DIR / f"{mtask_id}.toml"
             if not done_file.exists():
@@ -186,13 +203,13 @@ def run_watch_loop(concurrency: int = 3, loop_sleep: int = 120) -> None:
                 worker = claim_data.get("worker")
                 wt = Path(claim_data["worktree"])
                 
-                # Skip if we already have an active microtask in-flight for this parent
+                # Skip if we already have an active microtask in-flight for this parent.
+                # A claim with a done file is finished work awaiting review, not in-flight.
                 micro_in_flight = False
                 for mc in MICRO_CLAIMS_DIR.glob(f"{parent_id}.*.toml"):
                     mc_id = mc.stem
                     m_done = MICRO_DONE_DIR / f"{mc_id}.toml"
-                    m_review = MICRO_REVIEW_DIR / f"{mc_id}.toml"
-                    if not m_done.exists() or not m_review.exists():
+                    if not m_done.exists():
                         micro_in_flight = True
                         break
                 
@@ -204,29 +221,33 @@ def run_watch_loop(concurrency: int = 3, loop_sleep: int = 120) -> None:
                     mtask_id = done_f.stem
                     review_f = MICRO_REVIEW_DIR / f"{mtask_id}.toml"
                     if review_f.exists():
-                        continue
-                        
-                    # Find microtask in segment list
-                    microtasks = segment_task_phased(parent_task)
-                    mtask = next((m for m in microtasks if m["id"] == mtask_id), None)
-                    if mtask:
-                        with open(done_f, "rb") as df:
-                            done_data = tomllib.load(df)
-                        
+                        with open(review_f, "rb") as rf:
+                            if tomllib.load(rf).get("verdict") == "pass":
+                                continue
+                        # Failed verdict left behind by an interrupted cleanup
+                        ok = False
+                    else:
+                        # Find microtask in segment list
+                        microtasks = segment_task_phased(parent_task)
+                        mtask = next((m for m in microtasks if m["id"] == mtask_id), None)
+                        if not mtask:
+                            continue
+
                         # Verify the microtask
                         acceptance_cmd = parent_task["acceptance"]
-                        if mtask["phase_type"] in ("T", "I") and mtask["assertion_id"] != "R" and mtask["assertion_id"] != "D":
+                        if mtask["phase_type"] in ("T", "I"):
                             a_lower = mtask["assertion_id"].lower()
-                            # Run target pytest assertion specifically
-                            acceptance_cmd = f"pytest -k {a_lower}"
-                            
+                            # Run only this assertion's test files; -k would also
+                            # substring-match other assertions (a1 matches a10)
+                            acceptance_cmd = f"pytest modules/{mtask['module']}/tests/test_{a_lower}_*.py"
+
                         ok = review_phased_microtask(mtask_id, mtask, wt, acceptance_cmd)
                         log("microtask_reviewed", task=mtask_id, ok=ok)
-                        if not ok:
-                            # Re-add to queue by removing claim and cleanup failed done/review files
-                            MICRO_CLAIMS_DIR.joinpath(f"{mtask_id}.toml").unlink(missing_ok=True)
-                            done_f.unlink(missing_ok=True)
-                            review_f.unlink(missing_ok=True)
+                    if not ok:
+                        # Re-add to queue by removing claim and cleanup failed done/review files
+                        MICRO_CLAIMS_DIR.joinpath(f"{mtask_id}.toml").unlink(missing_ok=True)
+                        done_f.unlink(missing_ok=True)
+                        review_f.unlink(missing_ok=True)
                 
                 # Spawn next pending microtask
                 next_mtask = next_pending_phased_microtask(parent_task)
