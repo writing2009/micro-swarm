@@ -50,19 +50,33 @@ def review_phased_microtask(mtask_id: str, mtask: dict, worktree_path: Path, acc
                 lf.write("TEST_PLAN.md file not found.\n")
                 
         elif phase_type == "T":
-            # TDD Red verification: run pytest and verify it exits with 1 (fails as expected)
-            proc = subprocess.run(
-                ["bash", "-lc", f"{acceptance_cmd} ; test $? -eq 1"],
+            # TDD Red verification, two gates:
+            # 1. Collection must succeed — a test that "fails" due to a broken
+            #    import is not a valid red test and burns the green phase
+            # 2. The run must exit 1 (tests ran and failed as expected)
+            env = {**os.environ, "PATH": f"{ROOT}/.venv/bin:{os.environ['PATH']}"}
+            collect = subprocess.run(
+                ["bash", "-lc", f"{acceptance_cmd} --collect-only -q"],
                 cwd=str(worktree_path),
                 shell=False,
                 stdout=lf, stderr=subprocess.STDOUT,
-                env={**os.environ, "PATH": f"{ROOT}/.venv/bin:{os.environ['PATH']}"}
+                env=env
             )
-            if proc.returncode == 0:
-                verdict = "pass"
-                lf.write("\nVerification passed: test failed with exit code 1 as expected.\n")
+            if collect.returncode != 0:
+                lf.write(f"\nVerification failed: test collection exited {collect.returncode}; tests must import cleanly before the implementation exists.\n")
             else:
-                lf.write(f"\nVerification failed: exit {proc.returncode}.\n")
+                proc = subprocess.run(
+                    ["bash", "-lc", f"{acceptance_cmd} ; test $? -eq 1"],
+                    cwd=str(worktree_path),
+                    shell=False,
+                    stdout=lf, stderr=subprocess.STDOUT,
+                    env=env
+                )
+                if proc.returncode == 0:
+                    verdict = "pass"
+                    lf.write("\nVerification passed: collection clean and test failed with exit code 1 as expected.\n")
+                else:
+                    lf.write(f"\nVerification failed: exit {proc.returncode}.\n")
                 
         elif phase_type == "I":
             # TDD Green verification: run pytest and verify it exits with 0 (passes)

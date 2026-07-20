@@ -41,8 +41,8 @@ Create a `swarm-tasks.toml` file in the root of your project directory. This fil
 # Define the local AI worker nodes
 [workers]
 w1 = { host = "localhost", model = "qwen3.6:35b" }
-w2 = { host = "mini64pro.lan", model = "qwen3.6:35b" }
-w3 = { host = "gx10-444c.lan", model = "qwen3.6:35b" }
+w2 = { host = "ollama-host-2.lan", model = "qwen3.6:35b" }
+w3 = { host = "ollama-host-3.lan", model = "qwen3.6:35b" }
 
 # Define the tasks (each mapped to a specific codebase module)
 [[task]]
@@ -56,6 +56,45 @@ id = "T002"
 module = "vault-io"
 acceptance = "pytest modules/vault-io/tests/ -q"
 assertions = ["A1"]
+```
+
+### Worker Skills (recommended)
+
+The phase prompts direct workers to invoke opencode skills as their first step:
+
+| Skill | Used by phase |
+|---|---|
+| `using-superpowers` | Research |
+| `writing-plans` | Discovery |
+| `test-driven-development` | TDD Red and Green |
+| `verification-before-completion` | TDD Green |
+
+Install them into your **project's** `.opencode/skills/` directory (they are
+part of the [superpowers](https://github.com/obra/superpowers) skill catalog);
+micro-swarm automatically syncs that directory into every worker worktree.
+
+Workers are instructed to continue if a skill is unavailable, so nothing
+breaks without them — but with them installed, workers follow TDD and
+planning discipline far more reliably, which means fewer failed reviews
+and retries.
+
+Skill selection is configurable via an optional `[skills]` table in
+`swarm-tasks.toml`:
+
+```toml
+# Default: omit the [skills] table entirely to use the skills above.
+
+# Run with your own skills — override any subset of phases:
+[skills]
+research = "my-research-skill"
+tdd_red = "my-tdd-skill"
+tdd_green = "my-tdd-skill"
+# unset keys keep their defaults; set a key to "" to disable just that phase
+verification = ""
+
+# Or run without skills entirely:
+[skills]
+enabled = false
 ```
 
 ---
@@ -78,7 +117,25 @@ micro-swarm --watch --concurrency 3 --loop-sleep 60
 
 ---
 
-## 4. How it Works (Under the Hood)
+## 4. Verifying Your Setup (Smoke Test)
+
+To confirm your installation, worker endpoints, and `opencode` integration all
+work end-to-end, run the bundled smoke test — a one-assertion calculator module
+that exercises every phase of the pipeline:
+
+```bash
+cd examples/smoke-test
+./setup.sh
+cd swarm-smoke-test
+micro-swarm --watch --concurrency 1 --loop-sleep 20
+```
+
+See [examples/smoke-test/README.md](examples/smoke-test/README.md) for
+configuration options and what a successful run looks like.
+
+---
+
+## 5. How it Works (Under the Hood)
 
 1. **Segmentation**: A parent task `T001` with assertions `["A1", "A2"]` is automatically expanded into:
    * `T001.R` (Research phase: writes `RESEARCH.md` defining data contracts).

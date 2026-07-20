@@ -76,12 +76,16 @@ def claim_microtask(mtask_id: str, worker_id: str, wt: Path) -> bool:
 # otherwise pass the os.kill(pid, 0) liveness check forever.
 _worker_procs: dict[str, subprocess.Popen] = {}
 
-def spawn_phased_worker(task: dict, mtask: dict, worker_id: str, wt: Path, worker_config: dict) -> None:
+# Kill workers that run longer than this; a worker stuck in a reasoning loop
+# otherwise holds its microtask forever.
+WORKER_TIMEOUT_SECONDS = int(os.environ.get("SWARM_WORKER_TIMEOUT", "900"))
+
+def spawn_phased_worker(task: dict, mtask: dict, worker_id: str, wt: Path, worker_config: dict, skills: dict | None = None) -> None:
     """Spawn the local LLM agent to execute the microtask."""
     mtask_id = mtask["id"]
-    
+
     # Generate prompt and config
-    prompt = generate_phased_prompt(task, mtask)
+    prompt = generate_phased_prompt(task, mtask, worktree=wt, skills=skills)
     write_worker_opencode_json(worker_id, wt, worker_config)
     
     # Save prompt to temp file
@@ -98,9 +102,13 @@ def spawn_phased_worker(task: dict, mtask: dict, worker_id: str, wt: Path, worke
     model = worker_config.get("model", "qwen3.6:35b")
     provider_name = f"ollama-{host.split('.')[0]}"
 
-    with open(log_file, "w") as lf:
+    with open(log_file, "a") as lf:
+        lf.write(f"\n=== attempt {time.strftime('%Y-%m-%dT%H:%M:%S')} ===\n")
+        lf.flush()
+        # Pass the prompt text itself, not the file path: given a bare path the
+        # agent reads the file and asks for confirmation instead of executing
         proc = subprocess.Popen(
-            ["opencode", "run", "--auto", "-m", f"{provider_name}/{model}", str(prompt_file)],
+            ["opencode", "run", "--auto", "-m", f"{provider_name}/{model}", prompt],
             cwd=str(wt),
             stdout=lf,
             stderr=subprocess.STDOUT,
@@ -126,6 +134,22 @@ def reap_microtask_workers() -> None:
             pid = c.get("pid")
             if not pid:
                 continue
+
+            # Enforce the worker time budget
+            claimed_at = c.get("claimed_at")
+            if claimed_at:
+                try:
+                    age = time.time() - time.mktime(time.strptime(claimed_at, "%Y-%m-%dT%H:%M:%S"))
+                except ValueError:
+                    age = 0
+                if age > WORKER_TIMEOUT_SECONDS:
+                    try:
+                        os.killpg(pid, 15)  # worker leads its own process group
+                        log("worker_timeout_killed", task=mtask_id, pid=pid, age_seconds=int(age))
+                    except (ProcessLookupError, PermissionError):
+                        pass
+                    # Fall through: an already-dead pid is reaped below;
+                    # a just-killed one is reaped next cycle
 
             proc = _worker_procs.get(mtask_id)
             if proc is not None:
@@ -160,6 +184,7 @@ def run_watch_loop(concurrency: int = 3, loop_sleep: int = 120) -> None:
             data = load_tasks()
             tasks = data["tasks"]
             workers = data["workers"]
+            skills_cfg = data.get("skills", {})
             
             # Identify active workers
             busy_workers = set()
@@ -253,7 +278,7 @@ def run_watch_loop(concurrency: int = 3, loop_sleep: int = 120) -> None:
                 next_mtask = next_pending_phased_microtask(parent_task)
                 if next_mtask:
                     if claim_microtask(next_mtask["id"], worker, wt):
-                        spawn_phased_worker(parent_task, next_mtask, worker, wt, workers[worker])
+                        spawn_phased_worker(parent_task, next_mtask, worker, wt, workers[worker], skills_cfg)
                 elif all_phased_microtasks_done(parent_task):
                     # Write parent done file
                     parent_done = DONE_DIR / f"{parent_id}.toml"

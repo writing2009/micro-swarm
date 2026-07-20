@@ -35,10 +35,10 @@ def init_directories():
 def load_tasks() -> dict[str, dict]:
     """Loads and deserializes swarm-tasks.toml configuration."""
     if not TASKS_TOML.exists():
-        return {"tasks": {}, "workers": {}}
-    
+        return {"tasks": {}, "workers": {}, "skills": {}}
+
     with open(TASKS_TOML, "rb") as f:
         data = tomllib.load(f)
-    
+
     tasks = {t["id"]: t for t in data.get("task", [])}
-    return {"tasks": tasks, "workers": data.get("workers", {})}
+    return {"tasks": tasks, "workers": data.get("workers", {}), "skills": data.get("skills", {})}
