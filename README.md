@@ -20,10 +20,12 @@ We are sharing this framework with the open-source community to democratize agen
 
 ## 1. Installation
 
-To install `micro-swarm` locally in editable developer mode:
+To install `micro-swarm` locally in editable developer mode, create a virtual environment first (on Debian/Ubuntu you may need `apt install python3-venv`):
 
 ```bash
 cd micro-swarm
+python3 -m venv venv
+. venv/bin/activate
 pip install -e .
 ```
 
