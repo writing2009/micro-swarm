@@ -92,4 +92,24 @@ def write_worker_opencode_json(worker_id: str, wt: Path, worker_config: dict) ->
     
     cfg_file = opencode_dir / "opencode.json"
     cfg_file.write_text(json.dumps(cfg, indent=2))
+    # opencode resolves a git worktree back to the main project directory and
+    # creates the session against a project-level instance that never loads
+    # the worktree's config — the provider must also exist at the project root
+    _merge_into_root_opencode_json(cfg)
     return cfg_file
+
+def _merge_into_root_opencode_json(cfg: dict) -> None:
+    """Merge a worker's provider (and defaults) into ROOT/.opencode/opencode.json."""
+    root_dir = ROOT / ".opencode"
+    root_dir.mkdir(parents=True, exist_ok=True)
+    root_file = root_dir / "opencode.json"
+    existing = {}
+    if root_file.exists():
+        try:
+            existing = json.loads(root_file.read_text())
+        except ValueError:
+            pass  # unreadable config: rebuild it from ours
+    existing.setdefault("$schema", cfg["$schema"])
+    existing.setdefault("permission", cfg["permission"])
+    existing.setdefault("provider", {}).update(cfg["provider"])
+    root_file.write_text(json.dumps(existing, indent=2))

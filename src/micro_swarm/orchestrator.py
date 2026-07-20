@@ -173,9 +173,33 @@ def reap_microtask_workers() -> None:
         except Exception:
             pass
 
+def _acquire_orchestrator_lock() -> bool:
+    """Refuse to run two orchestrators against one project: they double-spawn
+    workers into the same worktrees and race each other's claims."""
+    lock = STATE / "orchestrator.pid"
+    if lock.exists():
+        try:
+            other = int(lock.read_text().strip())
+        except ValueError:
+            other = None
+        if other and other != os.getpid():
+            try:
+                os.kill(other, 0)
+                return False  # live orchestrator holds the lock
+            except ProcessLookupError:
+                pass  # stale lock from a dead orchestrator
+            except PermissionError:
+                return False  # pid exists under another user
+    lock.write_text(str(os.getpid()))
+    return True
+
 def run_watch_loop(concurrency: int = 3, loop_sleep: int = 120) -> None:
     """The central polling dispatcher loop."""
     init_directories()
+    if not _acquire_orchestrator_lock():
+        log("orchestrator_already_running", lock=str(STATE / "orchestrator.pid"))
+        print("Another orchestrator is already running for this project; exiting.")
+        return
     log("watch_start", concurrency=concurrency, loop_sleep=loop_sleep)
     
     while True:
